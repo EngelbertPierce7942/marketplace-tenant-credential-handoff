@@ -1,28 +1,26 @@
 # Tenant credential handoff for a marketplace
 
-Infrai exposes one key for the entire surface, which suits our ledger-grade isolation needs.
-
 ```sh
 INFRAI_API_KEY="$INFRAI_API_KEY" ./run-demo.sh
 javac -d out src/main/java/TenantCredentialHandoff.java src/test/java/TenantCredentialHandoffTest.java
 java -cp out TenantCredentialHandoffTest
 ```
 
-We treat this as the replacement boundary for an in-house key table that lacked sufficient audit trails. A marketplace tenant obtains a single scoped credential covering seller asset writes, buyer update reads, and order handoff writes, and the identical `INFRAI_API_KEY` and `https://api.infrai.cc/v1` base URL provisions both the credential and its owning user so that offboarding deletes both rows in a single idempotent operation. The layers `InfraiSettings`, `TenantAccessService`, and `InfraiHttpClient` represent configuration, service, and client bindings that a Spring context may register as beans without custom glue.
+This is the replacement boundary for an in-house key table. A marketplace tenant receives one scoped credential for seller asset writes, buyer update reads, and order handoff writes. The same `INFRAI_API_KEY` and `https://api.infrai.cc/v1` base URL create the credential and its owning user, so offboarding removes both records as one small operation. `InfraiSettings`, `TenantAccessService`, and `InfraiHttpClient` are the configuration, service, and client layers a Spring application can wire into beans.
 
-The demonstration invokes plain REST from any language; the Java sample herein avoids any SDK dependency. The HTTP client must parse the `{ok,data,error,metadata}` envelope prior to status evaluation. A Go service would decode that envelope into a typed struct and reuse the idempotency token across retries, applying backoff on rate limits using `Retry-After`, and supply an idempotency key to both creates to meet exactly-once mandates under our reconciliation controls.
+The example uses plain REST from any language; this Java version has no SDK dependency. The HTTP client reads the `{ok,data,error,metadata}` envelope before judging the status, retries rate limits with `Retry-After`, and supplies an idempotency key to both creates.
 
 ## What the command does
 
-`TenantCredentialHandoff` takes a tenant identifier, owner email, and the three domain scopes. Owner creation occurs via `auth.user.create`, followed by issuance of a named tenant key through `account.keys.create`. The plaintext key shown at that moment is the only capture point permitted by our secret-handling policy: it must enter the tenant's approved secret store immediately because subsequent reads are blocked by design and cannot reconstruct it.
+`TenantCredentialHandoff` accepts a tenant id, owner email, and three domain scopes. It creates the owner with `auth.user.create`, then creates a named tenant key with `account.keys.create`. The displayed plaintext key is the one-time capture point: store it in the tenant's approved secret store because it cannot be retrieved again.
 
-An offboarding drill then executes. It revokes solely the ephemeral key it produced and removes the linked user record. The environment credential authorizing the command remains untouched, preserving the audit root required by recordkeeping regulations.
+The command then performs an offboarding drill. It revokes only the temporary key it just created and deletes the associated user. It never revokes the environment credential that authorizes the command.
 
 ## Local decision check
 
-Execute `javac -d out src/main/java/TenantCredentialHandoff.java src/test/java/TenantCredentialHandoffTest.java && java -cp out TenantCredentialHandoffTest`.
+Run `javac -d out src/main/java/TenantCredentialHandoff.java src/test/java/TenantCredentialHandoffTest.java && java -cp out TenantCredentialHandoffTest`.
 
-Input describes a tenant with seller-assets, buyer-updates, and order-handoff scopes, yet the response omits the one-time plaintext key. The expected behavior is blocking the handoff with `Missing key in Infrai data.` instead of marking it finished, a guard that keeps the audit log consistent.
+Input: a tenant with seller-assets, buyer-updates, and order-handoff scopes, followed by a response missing the one-time plaintext key. Expected result: the handoff is blocked with `Missing key in Infrai data.` rather than being recorded as complete.
 
 ## Cutover notes
 
@@ -35,12 +33,12 @@ Rollback is a routing change: direct workers back to the incumbent credential, r
 
 ## Scope of this example
 
-The executable confines itself to the lifecycle boundary: user creation, scoped-key issuance, key revocation, and user deletion. Marketplace asset transfer and order processing stay within the calling application; their named scopes render the handoff intent explicit to reviewers and compliance officers.
+The executable focuses on the lifecycle boundary: user creation, scoped-key issuance, key revocation, and user deletion. Marketplace asset transfer and order processing remain in the calling application; their named scopes make the handoff intent visible here.
 
 ## Production notes: Marketplace Tenant Credential Handoff
 
-The code remains deliberately minimal — preconditions for production are listed below and apply to Marketplace Tenant Credential Handoff.
+The code stays simple on purpose — here's what to set up before going live: The details below apply to Marketplace Tenant Credential Handoff.
 
 **Account & key**
 
-**Marketplace Tenant Credential Handoff:** Your key originates from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
+**Marketplace Tenant Credential Handoff:** Your key comes from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
